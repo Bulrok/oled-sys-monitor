@@ -13,5 +13,6 @@ Background is pitch black (`#000000`). As such, usage on an OLED phone is recomm
 - Navigate to this IP on port 8000 on any browser (OLED phone recommended);
 - Enable fullscreen mode.
 
-Refresh rate and sensor variable ordering can be set directly in `config.ini` or through the webpage itself.
-Screen will be kept awake through embedded HTML/JS.
+Refresh rate and sensor variable ordering can be set directly in `config.ini` or through the webpage itself.<br>
+Screen will be kept awake through embedded HTML/JS.<br>
+Tested on a Windows 10 machine with an AMD CPU and NVidia VGA on Chrome under both Windows 10 and Android.
