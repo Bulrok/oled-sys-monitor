@@ -818,9 +818,10 @@ def index(_request: HttpRequest) -> HttpResponse:
         }
       } catch (e) { console.warn('Fullscreen failed', e); }
     }
-    async function onFSButton() { await enterFullscreen(); updateFSButtonVisibility(); }
+    async function onFSButton() { await enterFullscreen(); updateFSButtonVisibility(); requestWakeLock(); }
     function onFirstInteract() {
       enterFullscreen();
+      requestWakeLock();
       document.body.removeEventListener('click', onFirstInteract);
       document.body.removeEventListener('touchstart', onFirstInteract);
     }
@@ -842,7 +843,13 @@ def index(_request: HttpRequest) -> HttpResponse:
       try {
         if ('wakeLock' in navigator && !wakeLock && !document.hidden) {
           wakeLock = await navigator.wakeLock.request('screen');
-          wakeLock.addEventListener('release', () => { wakeLock = null; });
+          const onReleased = () => { wakeLock = null; syncWakeLockWithFullscreen(); };
+          if (wakeLock && typeof wakeLock.addEventListener === 'function') {
+            wakeLock.addEventListener('release', onReleased);
+          }
+          if (wakeLock) {
+            wakeLock.onrelease = onReleased;
+          }
         }
       } catch (e) { console.warn('WakeLock request failed', e); wakeLock = null; }
     }
@@ -850,7 +857,7 @@ def index(_request: HttpRequest) -> HttpResponse:
       try { if (wakeLock) { await wakeLock.release(); } } catch (_) {} finally { wakeLock = null; }
     }
     function syncWakeLockWithFullscreen() {
-      if (document.fullscreenElement && !document.hidden) { requestWakeLock(); }
+      if ((document.fullscreenElement || inStandaloneDisplay()) && !document.hidden) { requestWakeLock(); }
       else { releaseWakeLock(); }
     }
 
@@ -1040,6 +1047,9 @@ def index(_request: HttpRequest) -> HttpResponse:
       // wake lock lifecycle
       document.addEventListener('fullscreenchange', syncWakeLockWithFullscreen);
       document.addEventListener('visibilitychange', syncWakeLockWithFullscreen);
+      window.addEventListener('focus', syncWakeLockWithFullscreen);
+      window.addEventListener('blur', releaseWakeLock);
+      window.addEventListener('orientationchange', syncWakeLockWithFullscreen);
       window.addEventListener('pageshow', syncWakeLockWithFullscreen);
       window.addEventListener('pagehide', releaseWakeLock);
       applyViewportFix();
@@ -1112,6 +1122,8 @@ def main() -> None:
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind (default: 0.0.0.0)")
     parser.add_argument("--port", default="8000", help="Port to bind (default: 8000)")
     parser.add_argument("--lhm-dll", dest="lhm_dll", default=None, help="Path to LibreHardwareMonitorLib.dll (optional)")
+    parser.add_argument("--cert", dest="cert_path", default=None, help="Path to TLS certificate (PEM). Enables HTTPS when provided with --key")
+    parser.add_argument("--key", dest="key_path", default=None, help="Path to TLS private key (PEM). Enables HTTPS when provided with --cert")
     args = parser.parse_args()
 
     # Load UI config (order and refresh interval) at startup
@@ -1123,6 +1135,24 @@ def main() -> None:
     ohm_reader = CompositeMetricsReader(dll_path=args.lhm_dll)
 
     configure_django()
+
+    # If cert and key provided, serve via HTTPS using a simple WSGI server; otherwise use Django's dev server
+    if args.cert_path and args.key_path:
+        try:
+            from wsgiref.simple_server import make_server  # type: ignore
+            from django.core.wsgi import get_wsgi_application  # type: ignore
+            import ssl
+
+            application = get_wsgi_application()
+            httpd = make_server(args.host, int(args.port), application)
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(certfile=args.cert_path, keyfile=args.key_path)
+            httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+            print(f"Serving HTTPS on https://{args.host}:{args.port}")
+            httpd.serve_forever()
+            return
+        except Exception as e:
+            print(f"Failed to start HTTPS server: {e}. Falling back to HTTP dev server.")
 
     from django.core.management import call_command  # type: ignore
     call_command("runserver", f"{args.host}:{args.port}", use_reloader=False, verbosity=1)
