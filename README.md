@@ -18,7 +18,7 @@ Screen will be kept awake through embedded HTML/JS.<br>
 Tested on a Windows 10 machine with an AMD CPU and NVidia VGA on Chrome under both Windows 10 and Android.
 
 <details><summary>
-## HTTPS (recommended for Android wake lock)
+<b>HTTPS</b> <i>(recommended for Android wake lock)</i>
 </summary>
 Chrome on Android requires a secure context for `navigator.wakeLock`.
 
