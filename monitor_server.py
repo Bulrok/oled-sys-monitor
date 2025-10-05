@@ -21,6 +21,9 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 import json
 import configparser
+import subprocess
+import socket
+import ssl
 
 def is_admin():
     try:
@@ -1124,6 +1127,8 @@ def main() -> None:
     parser.add_argument("--lhm-dll", dest="lhm_dll", default=None, help="Path to LibreHardwareMonitorLib.dll (optional)")
     parser.add_argument("--cert", dest="cert_path", default=None, help="Path to TLS certificate (PEM). Enables HTTPS when provided with --key")
     parser.add_argument("--key", dest="key_path", default=None, help="Path to TLS private key (PEM). Enables HTTPS when provided with --cert")
+    parser.add_argument("--open-firewall", dest="open_firewall", action="store_true", help="Open Windows Firewall inbound rule for the chosen port")
+    parser.add_argument("--http-port", dest="http_port", default=None, help="Also start a plain HTTP server on this port for testing")
     args = parser.parse_args()
 
     # Load UI config (order and refresh interval) at startup
@@ -1136,21 +1141,115 @@ def main() -> None:
 
     configure_django()
 
-    # If cert and key provided, serve via HTTPS using a simple WSGI server; otherwise use Django's dev server
+    # Optionally open Windows Firewall for inbound connections on the specified port
+    if args.open_firewall:
+        try:
+            port = int(args.port)
+        except Exception:
+            port = 8000
+        try:
+            def open_windows_firewall_port(p: int) -> None:
+                rule_name = f"OLED System Monitor {p}"
+                # Add TCP inbound rule for all profiles
+                subprocess.run([
+                    "netsh", "advfirewall", "firewall", "add", "rule",
+                    f"name={rule_name}", "dir=in", "action=allow",
+                    "protocol=TCP", f"localport={p}", "profile=any"
+                ], check=False, capture_output=True, text=True)
+            open_windows_firewall_port(port)
+            print(f"Windows Firewall rule added (or already exists) for TCP {port}.")
+        except Exception as e:
+            print(f"Failed to open Windows Firewall for port {args.port}: {e}")
+
+    # Best-effort LAN URL hint
+    def _best_lan_ip() -> str:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+            finally:
+                s.close()
+        except Exception:
+            try:
+                return socket.gethostbyname(socket.gethostname())
+            except Exception:
+                return "<LAN-IP>"
+    scheme = "https" if (args.cert_path and args.key_path) else "http"
+    try:
+        port_int = int(args.port)
+    except Exception:
+        port_int = 8000
+    host_hint = _best_lan_ip() if args.host in ("0.0.0.0", "::") else args.host
+    print(f"Access from phone: {scheme}://{host_hint}:{port_int}/")
+    if args.host in ("127.0.0.1", "localhost"):
+        print("Warning: binding to localhost only; phones on the LAN will not be able to connect. Use --host 0.0.0.0")
+
+    # Inspect certificate SANs and warn if they do not include the LAN IP/hostname being advertised
+    if args.cert_path and args.key_path:
+        try:
+            # ssl._ssl._test_decode_cert is CPython-specific but helps without extra deps
+            info = ssl._ssl._test_decode_cert(args.cert_path)  # type: ignore[attr-defined]
+            sans = [v for (k, v) in info.get("subjectAltName", [])]
+            print(f"Certificate SANs: {', '.join(sans) if sans else '(none)'}")
+            # If host_hint is an IP, it must appear exactly as an IP SAN; if DNS name, as DNS SAN
+            def _ip_addr(h: str) -> bool:
+                try:
+                    socket.inet_aton(h)
+                    return True
+                except OSError:
+                    return False
+            need = host_hint
+            if _ip_addr(need):
+                matches = any(s == need for s in sans)
+                if not matches:
+                    print(f"Warning: certificate SANs do not include IP {need}. Chrome on Android will reject the connection.")
+            else:
+                matches = any(s.lower() == need.lower() for s in sans)
+                if not matches:
+                    print(f"Warning: certificate SANs do not include DNS name {need}. Chrome on Android will reject or warn.")
+            print("Note: For Android to trust the connection without errors, the issuing CA must be trusted on the phone, or use mkcert and install its root on the device.")
+        except Exception as e:
+            print(f"Info: unable to decode certificate for SAN inspection ({e}). Ensure the cert includes your LAN IP or DNS in subjectAltName.")
+
+    # If cert and key provided, serve via HTTPS using a simple WSGI server; optionally also start HTTP on --http-port
     if args.cert_path and args.key_path:
         try:
             from wsgiref.simple_server import make_server  # type: ignore
             from django.core.wsgi import get_wsgi_application  # type: ignore
             import ssl
+            import threading
 
             application = get_wsgi_application()
-            httpd = make_server(args.host, int(args.port), application)
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(certfile=args.cert_path, keyfile=args.key_path)
-            httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
-            print(f"Serving HTTPS on https://{args.host}:{args.port}")
-            httpd.serve_forever()
-            return
+
+            def _serve_https() -> None:
+                httpsd = make_server(args.host, int(args.port), application)
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.load_cert_chain(certfile=args.cert_path, keyfile=args.key_path)
+                httpsd.socket = context.wrap_socket(httpsd.socket, server_side=True)
+                print(f"Serving HTTPS on https://{args.host}:{args.port}")
+                httpsd.serve_forever()
+
+            threads: List[threading.Thread] = []
+            t_https = threading.Thread(target=_serve_https, daemon=True)
+            t_https.start()
+            threads.append(t_https)
+
+            if args.http_port:
+                def _serve_http() -> None:
+                    httpd = make_server(args.host, int(args.http_port), application)
+                    print(f"Serving HTTP on http://{args.host}:{args.http_port}")
+                    httpd.serve_forever()
+                t_http = threading.Thread(target=_serve_http, daemon=True)
+                t_http.start()
+                threads.append(t_http)
+
+            # Keep main thread alive
+            try:
+                while True:
+                    time.sleep(3600)
+            except KeyboardInterrupt:
+                return
         except Exception as e:
             print(f"Failed to start HTTPS server: {e}. Falling back to HTTP dev server.")
 
