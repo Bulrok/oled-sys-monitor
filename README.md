@@ -14,3 +14,4 @@ Background is pitch black (`#000000`). As such, usage on an OLED phone is recomm
 - Enable fullscreen mode.
 
 Refresh rate and sensor variable ordering can be set directly in `config.ini` or through the webpage itself.
+Screen will be kept awake through embedded HTML/JS.

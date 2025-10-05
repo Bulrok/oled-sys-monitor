@@ -836,6 +836,24 @@ def index(_request: HttpRequest) -> HttpResponse:
       if (stBtn) stBtn.style.display = shouldHide ? 'none' : 'inline-block';
       if (reBtn) reBtn.style.display = shouldHide ? 'none' : 'inline-block';
     }
+    // --- Keep screen awake while in fullscreen ---
+    let wakeLock = null;
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator && !wakeLock && !document.hidden) {
+          wakeLock = await navigator.wakeLock.request('screen');
+          wakeLock.addEventListener('release', () => { wakeLock = null; });
+        }
+      } catch (e) { console.warn('WakeLock request failed', e); wakeLock = null; }
+    }
+    async function releaseWakeLock() {
+      try { if (wakeLock) { await wakeLock.release(); } } catch (_) {} finally { wakeLock = null; }
+    }
+    function syncWakeLockWithFullscreen() {
+      if (document.fullscreenElement && !document.hidden) { requestWakeLock(); }
+      else { releaseWakeLock(); }
+    }
+
     let UPDATE_MS = 1000; // default update interval (ms)
     let pollTimer = null;
     let IS_REORDER = false;
@@ -1019,9 +1037,16 @@ def index(_request: HttpRequest) -> HttpResponse:
       document.body.addEventListener('touchstart', onFirstInteract, { once: true });
       document.addEventListener('fullscreenchange', updateViewportHeightVar);
       document.addEventListener('fullscreenchange', updateFSButtonVisibility);
+      // wake lock lifecycle
+      document.addEventListener('fullscreenchange', syncWakeLockWithFullscreen);
+      document.addEventListener('visibilitychange', syncWakeLockWithFullscreen);
+      window.addEventListener('pageshow', syncWakeLockWithFullscreen);
+      window.addEventListener('pagehide', releaseWakeLock);
       applyViewportFix();
       updateFSButtonVisibility();
       document.addEventListener('visibilitychange', updateFSButtonVisibility);
+      // ensure correct initial state
+      syncWakeLockWithFullscreen();
       // overlay close on backdrop click
       const ov = document.getElementById('settings-overlay');
       if (ov) ov.addEventListener('click', (e)=>{ if (e.target === ov) closeSettings(); });
