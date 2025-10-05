@@ -483,7 +483,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.i
 
 # Canonical sensor keys in initial/default order (must match HTML ids below)
 SENSOR_KEYS_DEFAULT: List[str] = [
-    "cpu_temp",
+    "cpu_core_temp",
     "cpu_hotspot_temp",
     "cpu_usage",
     "net_load",  # new fourth position
@@ -506,14 +506,22 @@ UI_CONFIG: Dict[str, Any] = {
     "update_interval_sec": 1.0,
 }
 
+ALIAS_TO_CANON: Dict[str, str] = {
+    # Accept legacy key and map to current canonical key
+    "cpu_temp": "cpu_core_temp",
+}
+
+CANON_TO_EXTERNAL: Dict[str, str] = {}
+
 
 def _normalize_order(order: List[str]) -> List[str]:
     seen: set = set()
     normalized: List[str] = []
     for key in order:
-        if key in SENSOR_KEYS_DEFAULT and key not in seen:
-            normalized.append(key)
-            seen.add(key)
+        canon = ALIAS_TO_CANON.get(key, key)
+        if canon in SENSOR_KEYS_DEFAULT and canon not in seen:
+            normalized.append(canon)
+            seen.add(canon)
     # Append any missing keys at the end, in default order
     for key in SENSOR_KEYS_DEFAULT:
         if key not in seen:
@@ -554,7 +562,9 @@ def save_ui_config(order: Optional[List[str]] = None, update_interval_sec: Optio
     if not cfg.has_section("ui"):
         cfg.add_section("ui")
     if order is not None:
-        cfg.set("ui", "order", ",".join(_normalize_order(order)))
+        canon_list = _normalize_order(order)
+        external_list = [CANON_TO_EXTERNAL.get(k, k) for k in canon_list]
+        cfg.set("ui", "order", ",".join(external_list))
     if update_interval_sec is not None:
         try:
             val = max(0.05, float(update_interval_sec))
@@ -835,7 +845,7 @@ def index(_request: HttpRequest) -> HttpResponse:
         const res = await fetch('/api/metrics', { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const m = await res.json();
-        setValue('cpu_temp', m.cpu?.core_temperature_c, '°C');
+        setValue('cpu_core_temp', m.cpu?.core_temperature_c, '°C');
         setValue('cpu_hotspot_temp', m.cpu?.hotspot_temperature_c, '°C');
         setValue('cpu_usage', m.cpu?.usage_percent, '%');
         setValue('cpu_clock_max', m.cpu?.max_clock_mhz, 'MHz');
@@ -1037,11 +1047,11 @@ def index(_request: HttpRequest) -> HttpResponse:
       </div>
     </div>
     <div class="grid">
-      <div class="item" data-key="cpu_temp"><div class="value" id="cpu_temp"><span class="v">—</span><span class="unit">°C</span></div><div class="label-below">CPU Core Temp</div></div>
+      <div class="item" data-key="cpu_core_temp"><div class="value" id="cpu_core_temp"><span class="v">—</span><span class="unit">°C</span></div><div class="label-below">CPU Core Temp</div></div>
       <div class="item" data-key="cpu_hotspot_temp"><div class="value" id="cpu_hotspot_temp"><span class="v">—</span><span class="unit">°C</span></div><div class="label-below">CPU Hot Spot</div></div>
       <div class="item" data-key="cpu_usage"><div class="value" id="cpu_usage"><span class="v">—</span><span class="unit">%</span></div><div class="label-below">CPU Usage</div></div>
       <div class="item" data-key="cpu_clock_max"><div class="value" id="cpu_clock_max"><span class="v">—</span><span class="unit">MHz</span></div><div class="label-below">CPU Max Clock</div></div>
-      <div class="item" data-key="net_load"><div class="value" id="net_load"><span class="v">—</span><span class="unit">%</span></div><div class="label-below">Net Load</div></div>
+      <div class="item" data-key="net_load"><div class="value" id="net_load"><span class="v">—</span><span class="unit">%</span></div><div class="label-below">Network Load</div></div>
       <div class="item" data-key="cpu_clock_avg"><div class="value" id="cpu_clock_avg"><span class="v">—</span><span class="unit">MHz</span></div><div class="label-below">CPU Avg Clock</div></div>
       <div class="item" data-key="cpu_power"><div class="value" id="cpu_power"><span class="v">—</span><span class="unit">W</span></div><div class="label-below">CPU Power</div></div>
 
