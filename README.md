@@ -16,3 +16,20 @@ Background is pitch black (`#000000`). As such, usage on an OLED phone is recomm
 Refresh rate and sensor variable ordering can be set directly in `config.ini` or through the webpage itself.<br>
 Screen will be kept awake through embedded HTML/JS.<br>
 Tested on a Windows 10 machine with an AMD CPU and NVidia VGA on Chrome under both Windows 10 and Android.
+
+<details><summary>
+## HTTPS (recommended for Android wake lock)
+</summary>
+Chrome on Android requires a secure context for `navigator.wakeLock`.
+
+- Generate or obtain a certificate and key (self‑signed is fine for LAN testing).
+- Run the server with HTTPS:
+
+```bash
+python monitor_server.py --host 0.0.0.0 --port 8443 --cert cert.pem --key key.pem
+```
+
+- On your phone, open `https://<your-ip>:8443/` and accept the certificate warning if prompted.
+
+Keeping the page in fullscreen will request a screen wake lock and keep the display on; the lock is released automatically if you leave fullscreen or the tab is hidden.
+</details>
