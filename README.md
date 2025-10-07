@@ -1,4 +1,7 @@
 # oled-sys-monitor
+
+![Example running on Android phone](https://github.com/user-attachments/assets/3ed88066-e760-40f2-aefa-eb8b31787eeb)
+
 Small python script utility for Windows that uses LibreHardwareMonitor and Django to serve system sensor variables such as CPU temperature through a local webpage on port 8000.
 
 Background is pitch black (`#000000`). As such, usage on an OLED phone is recommended.
